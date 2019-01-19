@@ -15,6 +15,7 @@ pip install nonebot-tuling
 from nonebot.default_config import *
 
 TULING_API_KEY = '你的图灵机器人 API KEY'
+# TULING_API_KEY = ['key1', 'key2']  # 也可以同时填入多个，会依次尝试
 ```
 
 ## 使用

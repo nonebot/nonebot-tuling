@@ -1,5 +1,6 @@
 import asyncio
-from typing import List, Optional, Union
+import json
+from typing import List, Optional, Union, Iterable
 
 import aiohttp
 from aiocqhttp.message import Message, escape
@@ -15,8 +16,10 @@ __all__ = []
 assert get_bot(), 'NoneBot is not initialized yet'
 
 bot = get_bot()
-api_key = getattr(bot.config, 'TULING_API_KEY', None)
-assert api_key, 'TULING_API_KEY must be set in configurations'
+api_keys = getattr(bot.config, 'TULING_API_KEY', None)
+assert api_keys, 'TULING_API_KEY must be set in configurations'
+if not isinstance(api_keys, Iterable) or isinstance(api_keys, str):
+    api_keys = [api_keys]
 
 EXPR_I_DONT_UNDERSTAND = (
     '我现在还不太明白你在说什么呢，但没关系，以后的我会变得更强呢！',
@@ -59,45 +62,48 @@ async def call_tuling_api(
         text: Optional[str],
         image: Optional[Union[List[str], str]]) -> List[str]:
     url = 'http://openapi.tuling123.com/openapi/api/v2'
-    payload = {
-        'reqType': 0,
-        'perception': {},
-        'userInfo': {
-            'apiKey': api_key,
-            'userId': context_id(session.ctx, use_hash=True)
+    for api_key in api_keys:
+        payload = {
+            'reqType': 0,
+            'perception': {},
+            'userInfo': {
+                'apiKey': api_key,
+                'userId': context_id(session.ctx, use_hash=True)
+            }
         }
-    }
 
-    group_unique_id = context_id(session.ctx, mode='group', use_hash=True)
-    if group_unique_id:
-        payload['userInfo']['groupId'] = group_unique_id
+        group_unique_id = context_id(session.ctx, mode='group', use_hash=True)
+        if group_unique_id:
+            payload['userInfo']['groupId'] = group_unique_id
 
-    if image and not isinstance(image, str):
-        image = image[0]
+        if image and not isinstance(image, str):
+            image = image[0]
 
-    if text:
-        payload['perception']['inputText'] = {'text': text}
-        payload['reqType'] = 0
-    elif image:
-        payload['perception']['inputImage'] = {'url': image}
-        payload['reqType'] = 1
-    else:
-        return []
+        if text:
+            payload['perception']['inputText'] = {'text': text}
+            payload['reqType'] = 0
+        elif image:
+            payload['perception']['inputImage'] = {'url': image}
+            payload['reqType'] = 1
+        else:
+            return []
 
-    try:
-        resp_payload = None
-        async with aiohttp.ClientSession() as sess:
-            async with sess.post(url, json=payload) as resp:
-                if resp.status == 200:
-                    resp_payload = await resp.json()
+        try:
+            resp_payload = None
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        resp_payload = json.loads(await resp.text())
 
-        if isinstance(resp_payload, dict) and resp_payload['results']:
-            return_list = []
-            for result in resp_payload['results']:
-                res_type = result.get('resultType')
-                if res_type in ('text', 'url'):
-                    return_list.append(result['values'][res_type])
-            return return_list
-        return []
-    except (aiohttp.ClientError, KeyError):
-        return []
+            if resp_payload['intent']['code'] == 4003:  # 当日请求超限
+                continue
+            if resp_payload['results']:
+                return_list = []
+                for result in resp_payload['results']:
+                    res_type = result.get('resultType')
+                    if res_type in ('text', 'url'):
+                        return_list.append(result['values'][res_type])
+                return return_list
+        except (aiohttp.ClientError, TypeError, KeyError):
+            pass
+    return []
